@@ -21,7 +21,6 @@ import {GoogleGenAI} from '@google/genai';
 import {useAtom} from 'jotai';
 import getStroke from 'perfect-freehand';
 import {useState} from 'react';
-// Fix: Corrected import paths for local modules to be relative.
 import {
   BoundingBoxMasksAtom,
   BoundingBoxes2DAtom,
@@ -37,10 +36,10 @@ import {
   ShareStream,
   TemperatureAtom,
   VideoRefAtom,
-} from './atoms';
-import {lineOptions} from './consts';
-import {DetectTypes} from './Types';
-import {getSvgPathFromStroke, loadImage} from './utils';
+} from './atoms.tsx';
+import {lineOptions} from './consts.tsx';
+import {DetectTypes} from './Types.tsx';
+import {getSvgPathFromStroke, loadImage} from './utils.tsx';
 
 const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
 export function Prompt() {

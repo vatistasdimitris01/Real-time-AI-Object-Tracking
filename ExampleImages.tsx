@@ -18,10 +18,9 @@
 // limitations under the License.
 
 import {useAtom} from 'jotai';
-// Fix: Corrected import paths for local modules to be relative.
-import {ImageSrcAtom, IsUploadedImageAtom} from './atoms';
-import {imageOptions} from './consts';
-import {useResetState} from './hooks';
+import {ImageSrcAtom, IsUploadedImageAtom} from './atoms.tsx';
+import {imageOptions} from './consts.tsx';
+import {useResetState} from './hooks.tsx';
 
 export function ExampleImages() {
   const [, setImageSrc] = useAtom(ImageSrcAtom);

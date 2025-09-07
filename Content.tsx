@@ -13,7 +13,7 @@
 
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY, KIND, either express or implied.
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -21,7 +21,6 @@ import {useAtom} from 'jotai';
 import getStroke from 'perfect-freehand';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ResizePayload, useResizeDetector} from 'react-resize-detector';
-// Fix: Corrected import paths for local modules to be relative.
 import {
   ActiveColorAtom,
   BoundingBoxes2DAtom,
@@ -37,9 +36,9 @@ import {
   RevealOnHoverModeAtom,
   ShareStream,
   VideoRefAtom,
-} from './atoms';
-import {lineOptions, segmentationColorsRgb} from './consts';
-import {getSvgPathFromStroke} from './utils';
+} from './atoms.tsx';
+import {lineOptions, segmentationColorsRgb} from './consts.tsx';
+import {getSvgPathFromStroke} from './utils.tsx';
 
 export function Content() {
   const [imageSrc] = useAtom(ImageSrcAtom);
@@ -298,7 +297,9 @@ export function Content() {
             });
           }}
           ref={(video) => {
-            videoRef.current = video;
+            if (videoRef.current) {
+              videoRef.current = video;
+            }
             if (video && !video.srcObject) {
               video.srcObject = stream;
             }

@@ -18,16 +18,15 @@
 // limitations under the License.
 
 import {useAtom} from 'jotai';
-// Fix: Corrected import paths for local modules to be relative.
 import {
   BumpSessionAtom,
   DrawModeAtom,
   ImageSentAtom,
   ImageSrcAtom,
   IsUploadedImageAtom,
-} from './atoms';
-import {useResetState} from './hooks';
-import {ScreenshareButton} from './ScreenshareButton';
+} from './atoms.tsx';
+import {useResetState} from './hooks.tsx';
+import {ScreenshareButton} from './ScreenshareButton.tsx';
 
 export function SideControls() {
   const [, setImageSrc] = useAtom(ImageSrcAtom);

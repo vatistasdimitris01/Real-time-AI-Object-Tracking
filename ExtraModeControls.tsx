@@ -18,7 +18,6 @@
 // limitations under the License.
 
 import {useAtom} from 'jotai';
-// Fix: Corrected import paths for local modules to be relative.
 import {
   BoundingBoxes2DAtom,
   BoundingBoxes3DAtom,
@@ -30,8 +29,8 @@ import {
   LinesAtom,
   PointsAtom,
   ShareStream,
-} from './atoms';
-import {Palette} from './Palette';
+} from './atoms.tsx';
+import {Palette} from './Palette.tsx';
 
 export function ExtraModeControls() {
   const [, setBoundingBoxes2D] = useAtom(BoundingBoxes2DAtom);

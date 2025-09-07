@@ -18,9 +18,8 @@
 // limitations under the License.
 
 import {useAtom} from 'jotai';
-// Fix: Corrected import paths for local modules to be relative.
-import {DetectTypeAtom, HoverEnteredAtom, RevealOnHoverModeAtom} from './atoms';
-import {useResetState} from './hooks';
+import {DetectTypeAtom, HoverEnteredAtom, RevealOnHoverModeAtom} from './atoms.tsx';
+import {useResetState} from './hooks.tsx';
 
 export function TopBar() {
   const resetState = useResetState();

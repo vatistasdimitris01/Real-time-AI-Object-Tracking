@@ -18,9 +18,8 @@
 // limitations under the License.
 
 import {useAtom} from 'jotai';
-// Fix: Corrected import paths for local modules to be relative.
-import {DetectTypeAtom, HoverEnteredAtom} from './atoms';
-import {DetectTypes} from './Types';
+import {DetectTypeAtom, HoverEnteredAtom} from './atoms.tsx';
+import {DetectTypes} from './Types.tsx';
 
 export function DetectTypeSelector() {
   return (

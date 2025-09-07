@@ -17,6 +17,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {GoogleGenAI} from '@google/genai';
 import {
   Detection,
   FaceDetector,
@@ -28,7 +29,17 @@ import {
 } from '@mediapipe/tasks-vision';
 import {useEffect, useRef, useState} from 'react';
 
-type VisionTask = 'object' | 'face' | 'hands' | 'pose';
+// Simplified the vision task type for this feature
+type DetectionMode = 'object' | 'person_analysis';
+
+interface BoundingBox {
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+}
+
+const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
 
 let lastVideoTime = -1;
 let requestAnimationId: number;
@@ -40,19 +51,28 @@ function App() {
   // MediaPipe model refs
   const objectDetector = useRef<ObjectDetector | null>(null);
   const faceDetector = useRef<FaceDetector | null>(null);
-  const handLandmarker = useRef<HandLandmarker | null>(null);
-  const poseLandmarker = useRef<PoseLandmarker | null>(null);
+  const handLandmarker = useRef<HandLandmarker | null>(null); // Kept for potential future use
+  const poseLandmarker = useRef<PoseLandmarker | null>(null); // Kept for potential future use
   const vision = useRef<FilesetResolver | null>(null);
 
   // App state
-  const [inputPrompt, setInputPrompt] = useState<string>('person');
+  const [inputPrompt, setInputPrompt] = useState<string>('age and gender');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadingMessage, setLoadingMessage] = useState<string>(
     'Initializing AI...',
   );
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [activeTask, setActiveTask] = useState<VisionTask>('object');
-  const [detectionTarget, setDetectionTarget] = useState<string>('person');
+  const [detectionMode, setDetectionMode] =
+    useState<DetectionMode>('person_analysis');
+  const [detectionTarget, setDetectionTarget] = useState<string>('');
+
+  // Person analysis state
+  const [personAnalysisResults, setPersonAnalysisResults] = useState<Array<{
+    bbox: BoundingBox;
+    text: string;
+  }> | null>(null);
+  const lastAnalysisTime = useRef<number>(0);
+  const isAnalyzing = useRef<boolean>(false);
 
   // Main setup effect
   useEffect(() => {
@@ -64,7 +84,7 @@ function App() {
         );
         await setupCamera();
         // Load the initial model
-        await switchModel(activeTask);
+        await switchModel('person_analysis');
       } catch (e) {
         console.error('Failed during setup', e);
         setErrorMessage('Failed to initialize. Please refresh the page.');
@@ -88,22 +108,17 @@ function App() {
     };
   }, []);
 
-  async function switchModel(task: VisionTask) {
+  async function switchModel(task: DetectionMode) {
     setIsLoading(true);
     setLoadingMessage('Loading AI vision model...');
-    // Close all current models
+    // Close active models
     objectDetector.current?.close();
     faceDetector.current?.close();
-    handLandmarker.current?.close();
-    poseLandmarker.current?.close();
     objectDetector.current = null;
     faceDetector.current = null;
-    handLandmarker.current = null;
-    poseLandmarker.current = null;
 
     try {
       if (task === 'object') {
-        // Fix: Cast vision.current to 'any' to resolve a type mismatch with MediaPipe's createFromOptions.
         objectDetector.current = await ObjectDetector.createFromOptions(
           vision.current! as any,
           {
@@ -115,8 +130,7 @@ function App() {
             runningMode: 'VIDEO',
           },
         );
-      } else if (task === 'face') {
-        // Fix: Cast vision.current to 'any' to resolve a type mismatch with MediaPipe's createFromOptions.
+      } else if (task === 'person_analysis') {
         faceDetector.current = await FaceDetector.createFromOptions(
           vision.current! as any,
           {
@@ -125,32 +139,6 @@ function App() {
               delegate: 'GPU',
             },
             runningMode: 'VIDEO',
-          },
-        );
-      } else if (task === 'hands') {
-        // Fix: Cast vision.current to 'any' to resolve a type mismatch with MediaPipe's createFromOptions.
-        handLandmarker.current = await HandLandmarker.createFromOptions(
-          vision.current! as any,
-          {
-            baseOptions: {
-              modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.tflite`,
-              delegate: 'GPU',
-            },
-            runningMode: 'VIDEO',
-            numHands: 2,
-          },
-        );
-      } else if (task === 'pose') {
-        // Fix: Cast vision.current to 'any' to resolve a type mismatch with MediaPipe's createFromOptions.
-        poseLandmarker.current = await PoseLandmarker.createFromOptions(
-          vision.current! as any,
-          {
-            baseOptions: {
-              modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.tflite`,
-              delegate: 'GPU',
-            },
-            runningMode: 'VIDEO',
-            numPoses: 2,
           },
         );
       }
@@ -185,6 +173,75 @@ function App() {
     }
   }
 
+  async function analyzeAllFaces(detections: Detection[]) {
+    if (
+      !detections ||
+      detections.length === 0 ||
+      !videoRef.current ||
+      isAnalyzing.current
+    )
+      return;
+    isAnalyzing.current = true;
+
+    try {
+      const analysisPromises = detections.map(async (detection) => {
+        if (!detection.boundingBox) return null;
+
+        const bbox = detection.boundingBox!;
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = bbox.width;
+        tempCanvas.height = bbox.height;
+        const tempCtx = tempCanvas.getContext('2d')!;
+        tempCtx.drawImage(
+          videoRef.current!,
+          bbox.originX,
+          bbox.originY,
+          bbox.width,
+          bbox.height,
+          0,
+          0,
+          bbox.width,
+          bbox.height,
+        );
+
+        const imageDataUrl = tempCanvas.toDataURL('image/jpeg');
+        const base64Data = imageDataUrl.split(',')[1];
+
+        const prompt = `Analyze the person in the image based on this user query: "${inputPrompt}". Provide a concise, single-line summary of your analysis. Include estimated age and gender if not specified. Format as a comma-separated list of key-value pairs (e.g., Gender: Female, Age: 25-30).`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: {
+            parts: [
+              {inlineData: {mimeType: 'image/jpeg', data: base64Data}},
+              {text: prompt},
+            ],
+          },
+        });
+
+        return {
+          bbox: {
+            originX: bbox.originX,
+            originY: bbox.originY,
+            width: bbox.width,
+            height: bbox.height,
+          },
+          text: response.text,
+        };
+      });
+
+      const results = (await Promise.all(analysisPromises)).filter(Boolean);
+      setPersonAnalysisResults(
+        results as Array<{bbox: BoundingBox; text: string}>,
+      );
+    } catch (e) {
+      console.error('Failed to analyze faces', e);
+    } finally {
+      isAnalyzing.current = false;
+    }
+  }
+
   function predict() {
     const video = videoRef.current;
     if (!video || video.paused || video.ended) return;
@@ -196,16 +253,25 @@ function App() {
     const renderLoop = () => {
       if (video.currentTime !== lastVideoTime) {
         lastVideoTime = video.currentTime;
-        const now = performance.now();
+        const nowMs = performance.now();
         let results: any;
-        if (activeTask === 'object' && objectDetector.current) {
-          results = objectDetector.current.detectForVideo(video, now);
-        } else if (activeTask === 'face' && faceDetector.current) {
-          results = faceDetector.current.detectForVideo(video, now);
-        } else if (activeTask === 'hands' && handLandmarker.current) {
-          results = handLandmarker.current.detectForVideo(video, now);
-        } else if (activeTask === 'pose' && poseLandmarker.current) {
-          results = poseLandmarker.current.detectForVideo(video, now);
+        if (detectionMode === 'object' && objectDetector.current) {
+          results = objectDetector.current.detectForVideo(video, nowMs);
+        } else if (
+          detectionMode === 'person_analysis' &&
+          faceDetector.current
+        ) {
+          results = faceDetector.current.detectForVideo(video, nowMs);
+        }
+
+        if (
+          detectionMode === 'person_analysis' &&
+          results?.detections?.length > 0
+        ) {
+          if (nowMs - lastAnalysisTime.current > 3000) {
+            lastAnalysisTime.current = nowMs;
+            analyzeAllFaces(results.detections);
+          }
         }
         drawResults(results, ctx, canvas.width, canvas.height);
       }
@@ -223,28 +289,10 @@ function App() {
     ctx.clearRect(0, 0, width, height);
     if (!results) return;
 
-    if (activeTask === 'object')
+    if (detectionMode === 'object')
       drawObjectDetections(results.detections, ctx, width);
-    if (activeTask === 'face')
+    if (detectionMode === 'person_analysis')
       drawFaceDetections(results.detections, ctx, width);
-    if (activeTask === 'hands')
-      drawLandmarks(
-        results.landmarks,
-        HandLandmarker.HAND_CONNECTIONS,
-        ctx,
-        width,
-        height,
-        '#FF0000',
-      );
-    if (activeTask === 'pose')
-      drawLandmarks(
-        results.landmarks,
-        PoseLandmarker.POSE_CONNECTIONS,
-        ctx,
-        width,
-        height,
-        '#00FF00',
-      );
   }
 
   function drawObjectDetections(
@@ -252,13 +300,20 @@ function App() {
     ctx: CanvasRenderingContext2D,
     width: number,
   ) {
+    const targets = detectionTarget
+      .toLowerCase()
+      .trim()
+      .split(/[\s,]+|and/i)
+      .filter(Boolean);
+
     for (const detection of detections) {
+      if (!detection.boundingBox || !detection.categories.length) continue;
       const category = detection.categories[0].categoryName.toLowerCase();
-      if (
-        detectionTarget &&
-        !category.includes(detectionTarget.toLowerCase().trim())
-      ) {
-        continue;
+      if (targets.length > 0) {
+        const matches = targets.some((target) => category.includes(target));
+        if (!matches) {
+          continue;
+        }
       }
 
       const bbox = detection.boundingBox!;
@@ -279,12 +334,68 @@ function App() {
     ctx: CanvasRenderingContext2D,
     width: number,
   ) {
+    if (!detections) return;
+
+    // First, draw a bounding box for every detected face
     for (const detection of detections) {
+      if (!detection.boundingBox) continue;
       const bbox = detection.boundingBox!;
       const mirroredX = width - bbox.originX - bbox.width;
-      ctx.strokeStyle = '#FFFF00';
+      ctx.strokeStyle = '#3B68FF';
       ctx.lineWidth = 2;
       ctx.strokeRect(mirroredX, bbox.originY, bbox.width, bbox.height);
+    }
+
+    // Then, try to attach analysis labels to the closest faces
+    if (personAnalysisResults && personAnalysisResults.length > 0) {
+      const unattachedDetections = [...detections];
+
+      for (const result of personAnalysisResults) {
+        let bestMatch: Detection | null = null;
+        let bestMatchIndex = -1;
+        let minDistance = Infinity;
+
+        const resultCenter = {
+          x: result.bbox.originX + result.bbox.width / 2,
+          y: result.bbox.originY + result.bbox.height / 2,
+        };
+
+        for (let i = 0; i < unattachedDetections.length; i++) {
+          const detection = unattachedDetections[i];
+          if (!detection.boundingBox) continue;
+          const detBbox = detection.boundingBox!;
+          const detCenter = {
+            x: detBbox.originX + detBbox.width / 2,
+            y: detBbox.originY + detBbox.height / 2,
+          };
+          const distance = Math.sqrt(
+            Math.pow(resultCenter.x - detCenter.x, 2) +
+              Math.pow(resultCenter.y - detCenter.y, 2),
+          );
+          if (distance < minDistance) {
+            minDistance = distance;
+            bestMatch = detection;
+            bestMatchIndex = i;
+          }
+        }
+
+        // Heuristic: If a reasonably close match is found, draw the label and "claim" the detection
+        if (bestMatch && minDistance < bestMatch.boundingBox!.width * 0.75) {
+          const bbox = bestMatch.boundingBox!;
+          const mirroredX = width - bbox.originX - bbox.width;
+          drawLabel(
+            result.text,
+            mirroredX,
+            bbox.originY + bbox.height,
+            ctx,
+            '#3B68FF',
+            'bottom',
+          );
+
+          // Remove from pool of available detections so it can't be labeled twice
+          unattachedDetections.splice(bestMatchIndex, 1);
+        }
+      }
     }
   }
 
@@ -319,64 +430,71 @@ function App() {
     x: number,
     y: number,
     ctx: CanvasRenderingContext2D,
+    color = '#3B68FF',
+    position: 'top' | 'bottom' = 'top',
   ) {
-    ctx.font = '20px Space Mono';
-    const textWidth = ctx.measureText(label).width;
-    const bgHeight = 30;
-    const bgWidth = textWidth + 16;
-    let bgX = x;
-    let bgY = y > bgHeight ? y - bgHeight : y;
+    ctx.font = '16px Space Mono';
+    const lines = label.split(', ');
+    let maxWidth = 0;
+    lines.forEach((line) => {
+      const width = ctx.measureText(line).width;
+      if (width > maxWidth) {
+        maxWidth = width;
+      }
+    });
 
-    ctx.fillStyle = '#3B68FF';
+    const lineHeight = 20;
+    const bgHeight = lines.length * lineHeight + 8;
+    const bgWidth = maxWidth + 16;
+    let bgX = x;
+    let bgY;
+
+    if (position === 'top') {
+      bgY = y > bgHeight ? y - bgHeight : y;
+    } else {
+      bgY = y;
+    }
+
+    ctx.fillStyle = color;
     ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, bgX + 8, bgY + bgHeight / 2);
+    ctx.fillStyle = color === '#FFFF00' ? '#000000' : '#FFFFFF';
+    ctx.textBaseline = 'top';
+    lines.forEach((line, index) => {
+      ctx.fillText(line, bgX + 8, bgY + 4 + index * lineHeight);
+    });
+  }
+
+  async function handleModeChange(mode: DetectionMode) {
+    if (mode === detectionMode) return;
+
+    setDetectionMode(mode);
+    setPersonAnalysisResults(null);
+    setErrorMessage('');
+
+    if (mode === 'object') {
+      const newPrompt = 'cup'; // A sensible default
+      setInputPrompt(newPrompt);
+      setDetectionTarget(newPrompt);
+    } else {
+      // person_analysis
+      const newPrompt = 'age and gender'; // A sensible default
+      setInputPrompt(newPrompt);
+      setDetectionTarget('');
+    }
+
+    await switchModel(mode);
   }
 
   async function handlePromptSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!inputPrompt) return;
 
-    setIsLoading(true);
-    setLoadingMessage('Updating tracker...');
-
-    try {
-      const lowerCasePrompt = inputPrompt.toLowerCase().trim();
-
-      const faceKeywords = ['face', 'head', 'selfie', 'visage'];
-      const handKeywords = ['hand', 'hands', 'finger', 'fingers', 'palm', 'wave'];
-      const poseKeywords = ['pose', 'body', 'stand', 'dance', 'jump', 'posture'];
-
-      let newActiveTask: VisionTask = 'object'; // Default to object
-      let newDetectionTarget = lowerCasePrompt;
-
-      if (faceKeywords.some((keyword) => lowerCasePrompt.includes(keyword))) {
-        newActiveTask = 'face';
-        newDetectionTarget = '';
-      } else if (
-        handKeywords.some((keyword) => lowerCasePrompt.includes(keyword))
-      ) {
-        newActiveTask = 'hands';
-        newDetectionTarget = '';
-      } else if (
-        poseKeywords.some((keyword) => lowerCasePrompt.includes(keyword))
-      ) {
-        newActiveTask = 'pose';
-        newDetectionTarget = '';
-      }
-
-      setDetectionTarget(newDetectionTarget);
-
-      if (newActiveTask !== activeTask) {
-        setActiveTask(newActiveTask);
-        await switchModel(newActiveTask);
-      }
-    } catch (error) {
-      console.error('Error switching model:', error);
-      setErrorMessage('Could not update tracker. Please try again.');
-    } finally {
-      setIsLoading(false);
+    if (detectionMode === 'object') {
+      setDetectionTarget(inputPrompt);
+    } else if (detectionMode === 'person_analysis') {
+      // The prompt has changed, so we want to re-analyze immediately.
+      lastAnalysisTime.current = 0;
+      setPersonAnalysisResults(null); // Clear previous results
     }
   }
 
@@ -391,12 +509,16 @@ function App() {
       />
       <canvas
         ref={canvasRef}
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full"
       />
 
       {(isLoading || errorMessage) && (
         <div
-          className={`absolute inset-0 z-20 flex flex-col items-center justify-center text-white ${errorMessage ? 'bg-red-800 bg-opacity-90' : 'bg-black bg-opacity-70'}`}>
+          className={`absolute inset-0 z-20 flex flex-col items-center justify-center text-white ${
+            errorMessage
+              ? 'bg-red-800 bg-opacity-90'
+              : 'bg-black bg-opacity-70'
+          }`}>
           {errorMessage ? (
             <p className="p-4 text-center text-lg">{errorMessage}</p>
           ) : (
@@ -425,23 +547,62 @@ function App() {
       )}
 
       <div className="absolute bottom-5 left-1/2 z-10 w-full max-w-lg -translate-x-1/2 px-4">
+        <div className="mb-2 flex justify-center gap-2">
+          <button
+            onClick={() => handleModeChange('person_analysis')}
+            disabled={isLoading}
+            className={`rounded-full px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+              detectionMode === 'person_analysis'
+                ? 'bg-[#3B68FF] text-white'
+                : 'bg-black bg-opacity-50 text-gray-300 hover:bg-opacity-70'
+            }`}>
+            Analyze Person
+          </button>
+          <button
+            onClick={() => handleModeChange('object')}
+            disabled={isLoading}
+            className={`rounded-full px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+              detectionMode === 'object'
+                ? 'bg-[#3B68FF] text-white'
+                : 'bg-black bg-opacity-50 text-gray-300 hover:bg-opacity-70'
+            }`}>
+            Detect Object
+          </button>
+        </div>
         <form
           onSubmit={handlePromptSubmit}
-          className="flex gap-2 rounded-full border border-gray-600 bg-black bg-opacity-50 p-2">
+          className="flex items-center gap-2 rounded-full border border-gray-600 bg-black bg-opacity-50 p-2 pl-4">
           <input
             type="text"
             value={inputPrompt}
             onChange={(e) => setInputPrompt(e.target.value)}
-            placeholder="Describe what to track..."
-            className="w-full flex-grow bg-transparent px-4 text-white placeholder-gray-400 focus:outline-none"
+            placeholder={
+              detectionMode === 'person_analysis'
+                ? 'Ask for more details (e.g., "mood")'
+                : 'Describe what to track...'
+            }
+            className="w-full flex-grow bg-transparent text-white placeholder-gray-400 focus:outline-none"
             disabled={isLoading || !!errorMessage}
             aria-label="Object to track"
           />
           <button
             type="submit"
-            className="rounded-full bg-[#3B68FF] px-6 py-2 text-white disabled:opacity-50"
-            disabled={isLoading || !!errorMessage}>
-            Update
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[#3B68FF] text-white transition-opacity disabled:opacity-50"
+            disabled={isLoading || !!errorMessage}
+            aria-label="Update Tracker">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2.5}
+              stroke="currentColor"
+              className="h-6 w-6">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 19.5v-15m0 0l-6.75 6.75m6.75-6.75l6.75 6.75"
+              />
+            </svg>
           </button>
         </form>
       </div>

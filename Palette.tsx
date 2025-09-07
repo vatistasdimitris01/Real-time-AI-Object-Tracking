@@ -18,9 +18,8 @@
 // limitations under the License.
 
 import {useAtom} from 'jotai';
-// Fix: Corrected import paths for local modules to be relative.
-import {ActiveColorAtom} from './atoms';
-import {colors} from './consts';
+import {ActiveColorAtom} from './atoms.tsx';
+import {colors} from './consts.tsx';
 
 export function Palette() {
   const [activeColor, setActiveColor] = useAtom(ActiveColorAtom);
