@@ -61,12 +61,9 @@ export const IsUploadedImageAtom = atom(false);
 export const BoundingBoxes2DAtom = atom<BoundingBox2D[]>([]);
 export const BoundingBoxes3DAtom = atom<BoundingBox3D[]>([]);
 export const BoundingBoxMasksAtom = atom<BoundingBoxMask[]>([]);
-// Fix: Explicitly define ShareStream as a writable atom to fix type inference issues.
-const shareStreamAtom = atom<MediaStream | null>(null);
-export const ShareStream = atom(
-  (get) => get(shareStreamAtom),
-  (get, set, update) => set(shareStreamAtom, update),
-);
+// Fix: The previous derived atom was causing type inference issues.
+// A primitive atom is writable by default and serves the same purpose.
+export const ShareStream = atom<MediaStream | null>(null);
 export const DetectTypeAtom = atom<DetectTypes>('2D bounding boxes');
 export const VideoRefAtom = atom({current: null as HTMLVideoElement | null});
 export const FOVAtom = atom(90);

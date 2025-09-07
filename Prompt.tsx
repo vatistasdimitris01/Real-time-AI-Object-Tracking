@@ -20,7 +20,7 @@
 import {GoogleGenAI} from '@google/genai';
 import {useAtom} from 'jotai';
 import getStroke from 'perfect-freehand';
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {
   BoundingBoxMasksAtom,
   BoundingBoxes2DAtom,
@@ -41,8 +41,9 @@ import {lineOptions} from './consts.tsx';
 import {DetectTypes} from './Types.tsx';
 import {getSvgPathFromStroke, loadImage} from './utils.tsx';
 
-const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
 export function Prompt() {
+  const ai = useRef<GoogleGenAI | null>(null);
+  const [initError, setInitError] = useState<string | null>(null);
   const [temperature, setTemperature] = useAtom(TemperatureAtom);
   const [, setBoundingBoxes2D] = useAtom(BoundingBoxes2DAtom);
   const [, setBoundingBoxes3D] = useAtom(BoundingBoxes3DAtom);
@@ -63,6 +64,24 @@ export function Prompt() {
   const [prompts, setPrompts] = useAtom(PromptsAtom);
   const [customPrompts, setCustomPrompts] = useAtom(CustomPromptsAtom);
   const [isLoading, setIsLoading] = useAtom(IsLoadingAtom);
+
+  useEffect(() => {
+    try {
+      ai.current = new GoogleGenAI({apiKey: process.env.API_KEY});
+      setInitError(null);
+    } catch (e) {
+      console.error('Failed to initialize GoogleGenAI in Prompt', e);
+      if (e instanceof Error && e.message.includes('API Key')) {
+        setInitError(
+          'Could not initialize AI. The API key is missing or invalid. Please check your environment configuration.',
+        );
+      } else if (e instanceof Error) {
+        setInitError(`AI Initialization Error: ${e.message}`);
+      } else {
+        setInitError('An unknown error occurred during AI initialization.');
+      }
+    }
+  }, []);
 
   const is2d = detectType === '2D bounding boxes';
 
@@ -104,6 +123,14 @@ export function Prompt() {
   };
 
   async function handleSend() {
+    if (!ai.current) {
+      if (!initError) {
+        setInitError(
+          'AI client is not available. Please ensure your API key is configured.',
+        );
+      }
+      return;
+    }
     setIsLoading(true);
     try {
       let activeDataURL;
@@ -157,8 +184,6 @@ export function Prompt() {
         activeDataURL = copyCanvas.toDataURL('image/png');
       }
 
-      const prompt = prompts[detectType];
-
       setHoverEntered(false);
       const config: {
         temperature: number;
@@ -181,7 +206,7 @@ export function Prompt() {
         textPromptToSend = getGenericPrompt(detectType);
       }
       const response = (
-        await ai.models.generateContent({
+        await ai.current.models.generateContent({
           model,
           contents: {
             parts: [
@@ -200,7 +225,8 @@ export function Prompt() {
 
       let parsedResponseText = response;
       if (parsedResponseText.includes('```json')) {
-        parsedResponseText = parsedResponseText.split('```json')[1].split('```')[0];
+        parsedResponseText =
+          parsedResponseText.split('```json')[1].split('```')[0];
       }
       const parsedResponse = JSON.parse(parsedResponseText);
       if (detectType === '2D bounding boxes') {
@@ -286,6 +312,8 @@ export function Prompt() {
         );
         setBoundingBoxes3D(formattedBoxes);
       }
+    } catch (e) {
+      console.error('Error generating content:', e);
     } finally {
       setIsLoading(false);
     }
@@ -293,6 +321,11 @@ export function Prompt() {
 
   return (
     <div className="flex grow flex-col gap-3">
+      {initError && (
+        <div className="p-2 text-sm bg-red-800 text-white rounded-md text-center">
+          {initError}
+        </div>
+      )}
       <div className="flex justify-between items-center">
         <div className="uppercase">
           Prompt:{' '}
@@ -305,7 +338,7 @@ export function Prompt() {
             type="checkbox"
             checked={showRawPrompt}
             onChange={() => setShowRawPrompt(!showRawPrompt)}
-            disabled={isLoading}
+            disabled={isLoading || !!initError}
           />
           <div>show raw prompt</div>
         </label>
@@ -327,7 +360,7 @@ export function Prompt() {
                 handleSend();
               }
             }}
-            disabled={isLoading}
+            disabled={isLoading || !!initError}
           />
         ) : showRawPrompt ? (
           <div className="mb-2 text-[var(--text-color-secondary)]">
@@ -363,7 +396,7 @@ export function Prompt() {
                   handleSend();
                 }
               }}
-              disabled={isLoading}
+              disabled={isLoading || !!initError}
             />
             {detectType === 'Segmentation masks' && (
               <>
@@ -384,7 +417,7 @@ export function Prompt() {
                       handleSend();
                     }
                   }}
-                  disabled={isLoading}
+                  disabled={isLoading || !!initError}
                 />
               </>
             )}
@@ -403,7 +436,7 @@ export function Prompt() {
                       handleSend();
                     }
                   }}
-                  disabled={isLoading}
+                  disabled={isLoading || !!initError}
                 />
               </>
             )}
@@ -414,7 +447,7 @@ export function Prompt() {
         <button
           className={`bg-[#3B68FF] px-12 !text-white !border-none flex items-center justify-center ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
           onClick={handleSend}
-          disabled={isLoading}>
+          disabled={isLoading || !!initError}>
           {isLoading ? (
             <>
               <svg
@@ -449,7 +482,7 @@ export function Prompt() {
             step="0.05"
             value={temperature}
             onChange={(e) => setTemperature(Number(e.target.value))}
-            disabled={isLoading}
+            disabled={isLoading || !!initError}
           />
           {temperature.toFixed(2)}
         </label>

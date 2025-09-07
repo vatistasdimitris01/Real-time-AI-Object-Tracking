@@ -90,12 +90,16 @@ function App() {
       } catch (e) {
         console.error('Failed during setup', e);
         let friendlyMessage = 'Failed to initialize. Please refresh the page.';
-        if (
-          e instanceof Error &&
-          (e.message.includes('API Key') || e.message.includes('API key'))
-        ) {
-          friendlyMessage =
-            'Could not initialize AI. The API key is missing or invalid. Please check the environment configuration.';
+        if (e instanceof Error) {
+          if (
+            e.message.includes('API Key') ||
+            e.message.includes('API key')
+          ) {
+            friendlyMessage =
+              'Could not initialize AI. The API key is missing or invalid. If deploying on a platform like Vercel, ensure your environment variable is correctly configured and exposed to the browser.';
+          } else {
+            friendlyMessage = `An error occurred during initialization: ${e.message}`;
+          }
         }
         setErrorMessage(friendlyMessage);
         setIsLoading(false);
