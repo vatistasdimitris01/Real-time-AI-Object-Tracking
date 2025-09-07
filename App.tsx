@@ -39,14 +39,13 @@ interface BoundingBox {
   height: number;
 }
 
-const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
-
 let lastVideoTime = -1;
 let requestAnimationId: number;
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ai = useRef<GoogleGenAI | null>(null);
 
   // MediaPipe model refs
   const objectDetector = useRef<ObjectDetector | null>(null);
@@ -78,6 +77,9 @@ function App() {
   useEffect(() => {
     async function setup() {
       try {
+        setLoadingMessage('Initializing AI...');
+        ai.current = new GoogleGenAI({apiKey: process.env.API_KEY});
+
         setLoadingMessage('Initializing vision tasks...');
         vision.current = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm',
@@ -87,7 +89,15 @@ function App() {
         await switchModel('person_analysis');
       } catch (e) {
         console.error('Failed during setup', e);
-        setErrorMessage('Failed to initialize. Please refresh the page.');
+        let friendlyMessage = 'Failed to initialize. Please refresh the page.';
+        if (
+          e instanceof Error &&
+          (e.message.includes('API Key') || e.message.includes('API key'))
+        ) {
+          friendlyMessage =
+            'Could not initialize AI. The API key is missing or invalid. Please check the environment configuration.';
+        }
+        setErrorMessage(friendlyMessage);
         setIsLoading(false);
       }
     }
@@ -178,7 +188,8 @@ function App() {
       !detections ||
       detections.length === 0 ||
       !videoRef.current ||
-      isAnalyzing.current
+      isAnalyzing.current ||
+      !ai.current
     )
       return;
     isAnalyzing.current = true;
@@ -210,7 +221,7 @@ function App() {
 
         const prompt = `Analyze the person in the image based on this user query: "${inputPrompt}". Provide a concise, single-line summary of your analysis. Include estimated age and gender if not specified. Format as a comma-separated list of key-value pairs (e.g., Gender: Female, Age: 25-30).`;
 
-        const response = await ai.models.generateContent({
+        const response = await ai.current.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: {
             parts: [
