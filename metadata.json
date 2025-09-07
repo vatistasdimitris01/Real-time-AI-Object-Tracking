@@ -1,0 +1,7 @@
+{
+  "name": "Real-time AI Object Tracking",
+  "description": "Use your camera to track objects in real-time. Just tell the AI what you want to find.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
